@@ -4,3 +4,6 @@
 [submodule "tmux-open"]
 	path = tmux-open
 	url = https://github.com/tmux-plugins/tmux-open
+[submodule "tmux-resurrect"]
+	path = tmux-resurrect
+	url = https://github.com/tmux-plugins/tmux-resurrect
