@@ -1,6 +1,6 @@
 [submodule "tmux-themepack"]
 	path = tmux-themepack
-	url = git@github.com:asfsdsf/tmux-themepack.git
+	url = https://github.com/asfsdsf/tmux-themepack.git
 [submodule "tmux-open"]
 	path = tmux-open
 	url = https://github.com/tmux-plugins/tmux-open
