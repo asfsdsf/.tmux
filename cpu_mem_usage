@@ -1,0 +1,5 @@
+#!/bin/bash
+# printf m:
+free -m|awk 'NR==2 {printf "%.1f%s", $3/1024, "GB,"}'
+# printf c:
+top -bn1 | awk '/%Cpu/ {printf $2 "%"}'
