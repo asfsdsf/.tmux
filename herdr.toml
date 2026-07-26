@@ -19,9 +19,14 @@ prefix = "ctrl+a"
 # Keep Herdr's workspace-only picker available without occupying tmux's w key.
 workspace_picker = "prefix+alt+w"
 # Keep the custom Ctrl-f find-session binding on Herdr's broader navigator.
-goto = "prefix+ctrl+f"
 new_workspace = "prefix+ctrl+c"
 detach = "prefix+d"
+# tmux session navigation maps to Herdr workspace navigation.
+rename_workspace = ["prefix+shift+w", "prefix+$"]
+previous_workspace = "prefix+("
+next_workspace = "prefix+)"
+# Retain tmux's find-window shortcut as another route to Herdr's navigator.
+goto = ["prefix+ctrl+f", "prefix+f"]
 
 # Window/tab navigation.
 new_tab = "prefix+c"
@@ -33,21 +38,21 @@ switch_tab = "prefix+1..9"
 close_tab = "prefix+ampersand"
 
 # Pane layout and navigation.
-split_vertical = "prefix+/"
-split_horizontal = "prefix+minus"
-focus_pane_left = "prefix+h"
-focus_pane_down = "prefix+j"
-focus_pane_up = "prefix+k"
-focus_pane_right = "prefix+l"
-swap_pane_up = "prefix+shift+comma"
-swap_pane_down = "prefix+shift+period"
+split_vertical = ["prefix+/", "prefix+percent"]
+split_horizontal = ["prefix+minus", "prefix+double_quote"]
+focus_pane_left = ["prefix+h", "prefix+left"]
+focus_pane_down = ["prefix+j", "prefix+down"]
+focus_pane_up = ["prefix+k", "prefix+up"]
+focus_pane_right = ["prefix+l", "prefix+right"]
+swap_pane_up = ["prefix+shift+comma", "prefix+{"]
+swap_pane_down = ["prefix+shift+period", "prefix+}"]
 cycle_pane_next = "prefix+o"
 last_pane = "prefix+semicolon"
 close_pane = "prefix+x"
 zoom = "prefix+z"
 
 # Copy, resize, and configuration controls.
-copy_mode = "prefix+enter"
+copy_mode = ["prefix+enter", "prefix+[", "alt+u"]
 resize_mode = "prefix+shift+r"
 reload_config = "prefix+r"
 edit_scrollback = "prefix+alt+e"
@@ -81,6 +86,13 @@ key = "prefix+shift+minus"
 type = "shell"
 description = "Split pane right"
 command = "herdr pane split --current --direction right --focus"
+
+# Move the focused pane into its own tab, matching tmux break-pane.
+[[keys.command]]
+key = "prefix+!"
+type = "shell"
+description = "Move pane to new tab"
+command = "\"$HERDR_BIN_PATH\" pane move \"$HERDR_ACTIVE_PANE_ID\" --new-tab --focus"
 
 # Retain tmux's Ctrl-h previous-window shortcut as another MRU switch.
 [[keys.command]]
@@ -125,6 +137,75 @@ key = "prefix+ctrl+k"
 type = "shell"
 description = "Resize pane up"
 command = "herdr pane resize --current --direction up"
+
+# tmux-style one-cell resize shortcuts. Herdr expresses resize amounts as a
+# fraction of the available layout, so 0.01 is the closest portable match.
+[[keys.command]]
+key = "prefix+ctrl+left"
+type = "shell"
+description = "Resize pane left (small)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction left --amount 0.01"
+
+[[keys.command]]
+key = "prefix+ctrl+down"
+type = "shell"
+description = "Resize pane down (small)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction down --amount 0.01"
+
+[[keys.command]]
+key = "prefix+ctrl+up"
+type = "shell"
+description = "Resize pane up (small)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction up --amount 0.01"
+
+[[keys.command]]
+key = "prefix+ctrl+right"
+type = "shell"
+description = "Resize pane right (small)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction right --amount 0.01"
+
+# tmux-style five-cell resize shortcuts. A 0.05 layout fraction is Herdr's
+# native resize step and is the closest portable match.
+[[keys.command]]
+key = "prefix+alt+left"
+type = "shell"
+description = "Resize pane left (large)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction left --amount 0.05"
+
+[[keys.command]]
+key = "prefix+alt+down"
+type = "shell"
+description = "Resize pane down (large)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction down --amount 0.05"
+
+[[keys.command]]
+key = "prefix+alt+up"
+type = "shell"
+description = "Resize pane up (large)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction up --amount 0.05"
+
+[[keys.command]]
+key = "prefix+alt+right"
+type = "shell"
+description = "Resize pane right (large)"
+command = "\"$HERDR_BIN_PATH\" pane resize --current --direction right --amount 0.05"
+
+# tmux-style information and clock popups.
+[[keys.command]]
+key = "prefix+i"
+type = "popup"
+description = "Display pane information"
+command = "sh -lc '\"$HERDR_BIN_PATH\" pane get \"$HERDR_ACTIVE_PANE_ID\"; printf \"\\nPress Enter to close...\"; read _'"
+width = "80%"
+height = "80%"
+
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+description = "Show clock"
+command = "sh -lc 'date \"+%Y-%m-%d %H:%M:%S\"; printf \"\\nPress Enter to close...\"; read _'"
+width = 44
+height = 7
 
 [ui]
 # Keep the persistent agent overview, but use compact one-line rows.
