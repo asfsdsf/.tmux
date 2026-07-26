@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+herdr_bin=${HERDR_BIN_PATH:-herdr}
+snapshot=$($herdr_bin api snapshot)
+workspace_id=${HERDR_WORKSPACE_ID:-$(printf '%s\n' "$snapshot" | jq -r '.result.snapshot.focused_workspace_id // empty')}
+current_tab_id=${HERDR_TAB_ID:-$(printf '%s\n' "$snapshot" | jq -r '.result.snapshot.focused_tab_id // empty')}
+
+[ -n "$workspace_id" ] && [ -n "$current_tab_id" ] || exit 0
+
+state_file=${HERDR_PLUGIN_STATE_DIR:-}/tab-mru.json
+target_tab_id=
+
+if [ -s "$state_file" ]; then
+  target_tab_id=$(jq -r \
+    --arg workspace_id "$workspace_id" \
+    --arg current_tab_id "$current_tab_id" \
+    '(.[$workspace_id] // []) | map(select(. != $current_tab_id)) | first // empty' \
+    "$state_file")
+fi
+
+# Discard closed/moved stale entries. On first use, fall back to the previous
+# tab in display order; subsequent focus events provide true MRU behavior.
+if [ -n "$target_tab_id" ]; then
+  target_exists=$(printf '%s\n' "$snapshot" | jq -r \
+    --arg workspace_id "$workspace_id" \
+    --arg target_tab_id "$target_tab_id" \
+    '[.result.snapshot.tabs[] | select(.workspace_id == $workspace_id and .tab_id == $target_tab_id)] | length')
+  [ "$target_exists" -gt 0 ] || target_tab_id=
+fi
+
+if [ -z "$target_tab_id" ]; then
+  target_tab_id=$(printf '%s\n' "$snapshot" | jq -r \
+    --arg workspace_id "$workspace_id" \
+    --arg current_tab_id "$current_tab_id" '
+      [.result.snapshot.tabs[] | select(.workspace_id == $workspace_id)] as $tabs
+      | ($tabs | map(.tab_id) | index($current_tab_id)) as $index
+      | if ($tabs | length) < 2 then empty
+        elif $index == null then $tabs[0].tab_id
+        elif $index == 0 then $tabs[-1].tab_id
+        else $tabs[$index - 1].tab_id
+        end
+    ')
+fi
+
+if [ "${1:-}" = "--print-target" ]; then
+  printf '%s\n' "$target_tab_id"
+  exit 0
+fi
+
+[ -n "$target_tab_id" ] || exit 0
+exec "$herdr_bin" tab focus "$target_tab_id"

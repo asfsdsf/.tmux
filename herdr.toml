@@ -1,0 +1,141 @@
+# Herdr configuration modeled after tmux.conf in this repository.
+# ~/.config/herdr/config.toml is a symlink to this file.
+
+onboarding = false
+
+[theme]
+# Use the outer terminal's palette, matching the white/black tmux theme.
+name = "terminal"
+
+[terminal]
+# Match tmux's behavior: new panes and tabs inherit the current directory.
+new_cwd = "follow"
+
+[keys]
+# Use the GNU Screen-compatible prefix configured in tmux.
+prefix = "ctrl+a"
+
+# Session/workspace navigation.
+# Keep Herdr's workspace-only picker available without occupying tmux's w key.
+workspace_picker = "prefix+alt+w"
+# Keep the custom Ctrl-f find-session binding on Herdr's broader navigator.
+goto = "prefix+ctrl+f"
+new_workspace = "prefix+ctrl+c"
+detach = "prefix+d"
+
+# Window/tab navigation.
+new_tab = "prefix+c"
+rename_tab = "prefix+comma"
+# Keep Herdr's ordered previous-tab action on tmux's alternate binding.
+previous_tab = "prefix+alt+p"
+next_tab = "prefix+ctrl+l"
+switch_tab = "prefix+1..9"
+close_tab = "prefix+ampersand"
+
+# Pane layout and navigation.
+split_vertical = "prefix+/"
+split_horizontal = "prefix+minus"
+focus_pane_left = "prefix+h"
+focus_pane_down = "prefix+j"
+focus_pane_up = "prefix+k"
+focus_pane_right = "prefix+l"
+swap_pane_up = "prefix+shift+comma"
+swap_pane_down = "prefix+shift+period"
+cycle_pane_next = "prefix+o"
+last_pane = "prefix+semicolon"
+close_pane = "prefix+x"
+zoom = "prefix+z"
+
+# Copy, resize, and configuration controls.
+copy_mode = "prefix+enter"
+resize_mode = "prefix+shift+r"
+reload_config = "prefix+r"
+edit_scrollback = "prefix+alt+e"
+
+# Exact tmux semantics supplied by the local compatibility plugin:
+#   w   -> choose-tree across every pane
+#   Tab -> last-window (most-recently-used tab)
+[[keys.command]]
+key = "prefix+w"
+type = "plugin_action"
+description = "Choose any pane"
+command = "zky.tmux-compat.choose-pane"
+
+[[keys.command]]
+key = "prefix+tab"
+type = "plugin_action"
+description = "Switch to most recent tab"
+command = "zky.tmux-compat.last-tab"
+
+[[keys.command]]
+key = "prefix+e"
+type = "popup"
+description = "Edit Herdr configuration"
+command = "sh -lc '${EDITOR:-vim} \"${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}\"; herdr server reload-config'"
+width = "90%"
+height = "90%"
+
+# tmux also binds _ to a right-hand split.
+[[keys.command]]
+key = "prefix+shift+minus"
+type = "shell"
+description = "Split pane right"
+command = "herdr pane split --current --direction right --focus"
+
+# Retain tmux's Ctrl-h previous-window shortcut as another MRU switch.
+[[keys.command]]
+key = "prefix+ctrl+h"
+type = "plugin_action"
+description = "Switch to most recent tab"
+command = "zky.tmux-compat.last-tab"
+
+# tmux uses uppercase H/J/K/L (and Ctrl-j/Ctrl-k) for pane resizing.
+[[keys.command]]
+key = "prefix+shift+h"
+type = "shell"
+description = "Resize pane left"
+command = "herdr pane resize --current --direction left"
+
+[[keys.command]]
+key = "prefix+shift+j"
+type = "shell"
+description = "Resize pane down"
+command = "herdr pane resize --current --direction down"
+
+[[keys.command]]
+key = "prefix+shift+k"
+type = "shell"
+description = "Resize pane up"
+command = "herdr pane resize --current --direction up"
+
+[[keys.command]]
+key = "prefix+shift+l"
+type = "shell"
+description = "Resize pane right"
+command = "herdr pane resize --current --direction right"
+
+[[keys.command]]
+key = "prefix+ctrl+j"
+type = "shell"
+description = "Resize pane down"
+command = "herdr pane resize --current --direction down"
+
+[[keys.command]]
+key = "prefix+ctrl+k"
+type = "shell"
+description = "Resize pane up"
+command = "herdr pane resize --current --direction up"
+
+[ui]
+# Keep the persistent agent overview, but use compact one-line rows.
+pane_gaps = false
+
+agent_panel_sort = "spaces"
+[experimental]
+# tmux-resurrect preserves pane output; enable Herdr's corresponding history.
+pane_history = true
+
+[advanced]
+# Herdr uses a byte limit rather than tmux's line count. Ten MiB comfortably
+# covers the 50,000-line history configured in tmux for typical terminal text.
+scrollback_limit_bytes = 10485760

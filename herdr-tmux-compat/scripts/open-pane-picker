@@ -1,0 +1,63 @@
+#!/bin/sh
+set -eu
+
+herdr_bin=${HERDR_BIN_PATH:-herdr}
+state_dir=${HERDR_PLUGIN_STATE_DIR:?}
+socket_path=${HERDR_SOCKET_PATH:?}
+result_file="$state_dir/pane-picker-result.$$"
+snapshot_file="$state_dir/pane-picker-snapshot.$$"
+mkdir -p "$state_dir"
+rm -f "$result_file" "$snapshot_file"
+
+cleanup() {
+  rm -f "$result_file" "$snapshot_file"
+}
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
+
+# Capture the tiled state before creating the overlay, otherwise the picker
+# itself would appear as another pane in its own tree.
+"$herdr_bin" api snapshot > "$snapshot_file"
+
+open_response=$("$herdr_bin" plugin pane open \
+  --plugin zky.tmux-compat \
+  --entrypoint pane-picker \
+  --placement overlay \
+  --env "HERDR_TMUX_PICKER_RESULT=$result_file" \
+  --env "HERDR_TMUX_PICKER_SNAPSHOT=$snapshot_file" \
+  --focus)
+overlay_pane=$(printf '%s\n' "$open_response" | jq -r '.result.plugin_pane.pane.pane_id // empty')
+[ -n "$overlay_pane" ] || exit 1
+
+# The action process is outside the overlay's process group. Wait here so the
+# tree UI can exit fully before asking Herdr to focus its selected tiled pane.
+while [ ! -e "$result_file" ]; do
+  # A forced close may terminate Python before its finally block runs.
+  "$herdr_bin" pane get "$overlay_pane" >/dev/null 2>&1 || exit 0
+  sleep 0.05
+done
+
+pane_id=$(sed -n '1p' "$result_file")
+[ -n "$pane_id" ] || exit 0
+printf 'selected pane: %s\n' "$pane_id"
+
+request=$(jq -nc \
+  --arg id "tmux-compat:focus:$$" \
+  --arg pane_id "$pane_id" \
+  '{id:$id, method:"pane.focus", params:{pane_id:$pane_id}}')
+
+# Closing an overlay is asynchronous. Retry briefly until the tiled UI accepts
+# the focus request and confirms the intended pane.
+attempt=0
+while [ "$attempt" -lt 40 ]; do
+  response=$(printf '%s\n' "$request" | nc -U -w 1 "$socket_path" 2>/dev/null || true)
+  focused=$(printf '%s\n' "$response" | jq -r '.result.pane.pane_id // empty' 2>/dev/null || true)
+  if [ "$focused" = "$pane_id" ]; then
+    printf 'focused pane: %s\n' "$pane_id"
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.05
+done
+
+exit 1

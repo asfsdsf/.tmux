@@ -1,6 +1,8 @@
 # Source this file to change tmux color to white black
 # e.g. in ~/.tmux.conf, add following to the end:
-# source-file "${HOME}/Software/tmux/white_black_color"
+# source-file "/path/to/tmux/white_black_color"
+# Remember this repository's location when this file is sourced independently.
+set-environment -gF TMUX_CONFIG_DIR '#{d:current_file}'
 
 # Basic status bar colors
 set -g status-fg colour232
@@ -12,7 +14,7 @@ set -g status-left "#[fg=colour232,bg=colour15,bold] #S #[fg=colour15,bg=colour2
 
 # Right side of status bar
 set -g status-right-length 150
-set -g status-right "#[fg=none]#[bg=none]#[none]#{?client_prefix,⌨ ,}#[fg=colour15,bg=colour15]#[fg=colour232,bg=colour15] %H:%M:%S #[fg=colour232,bg=colour15]#[fg=colour15,bg=colour232] %d-%b-%y #[fg=colour15,bg=colour232]#[fg=colour232,bg=colour15,bold] #(bash ~/Software/tmux/cpu_mem_usage)"
+set -g status-right "#[fg=none]#[bg=none]#[none]#{?client_prefix,⌨ ,}#[fg=colour15,bg=colour15]#[fg=colour232,bg=colour15] %H:%M:%S #[fg=colour232,bg=colour15]#[fg=colour15,bg=colour232] %d-%b-%y #[fg=colour15,bg=colour232]#[fg=colour232,bg=colour15,bold] #(bash \"#{TMUX_CONFIG_DIR}/cpu_mem_usage\")"
 
 # Pane number indicator
 set -g display-panes-colour colour15
@@ -161,4 +163,3 @@ tmux_conf_battery_status_discharging='↓'    # U+2193
 # clock style
 tmux_conf_theme_clock_colour='#ffffff'  # light blue
 tmux_conf_theme_clock_style='24'
-

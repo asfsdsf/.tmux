@@ -1,0 +1,32 @@
+id = "zky.tmux-compat"
+name = "Tmux Compatibility"
+version = "0.4.0"
+min_herdr_version = "0.7.5"
+description = "Exact tmux-style pane chooser and most-recent-tab switching"
+platforms = ["macos"]
+
+[[actions]]
+id = "choose-pane"
+title = "Choose pane"
+contexts = ["global"]
+command = ["sh", "scripts/open-pane-picker"]
+
+[[actions]]
+id = "last-tab"
+title = "Switch to most recent tab"
+contexts = ["global"]
+command = ["sh", "scripts/last-tab"]
+
+[[events]]
+on = "tab.focused"
+command = ["sh", "scripts/track-tab-event"]
+
+[[events]]
+on = "tab.closed"
+command = ["sh", "scripts/track-tab-event"]
+
+[[panes]]
+id = "pane-picker"
+title = "Choose pane"
+placement = "overlay"
+command = ["python3", "scripts/pane-tree.py"]
