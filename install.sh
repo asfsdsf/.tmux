@@ -241,7 +241,9 @@ install_packages() {
 }
 
 install_tmux_config() {
-  [ "$install_tmux" -eq 1 ] || return
+  if [ "$install_tmux" -ne 1 ]; then
+    return 0
+  fi
 
   if [ -n "$tmux_backup_path" ]; then
     mv "$tmux_config_path" "$tmux_backup_path"
@@ -264,7 +266,9 @@ install_tmux_config() {
 }
 
 install_herdr_config() {
-  [ "$install_herdr" -eq 1 ] || return
+  if [ "$install_herdr" -ne 1 ]; then
+    return 0
+  fi
 
   HERDR_CONFIG_PATH=$config_dir/herdr.toml herdr config check
 
