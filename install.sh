@@ -2,7 +2,9 @@
 
 set -eu
 
-default_config_dir=$HOME/Software/tmux
+# Default to the checkout containing this installer. The repository may live
+# anywhere on another machine, so do not assume ~/Software/tmux.
+default_config_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P) || exit 1
 install_tmux=1
 install_herdr=1
 

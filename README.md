@@ -7,8 +7,9 @@ and Herdr use `Ctrl-a` as the prefix key.
 ## Interactive installation
 
 Run the installer and use its checkbox-style menu to install tmux, Herdr, or
-both. It prompts for this configuration directory and backs up existing tmux
-or Herdr configuration files with an `.old` suffix before replacing them.
+both. It automatically uses the directory containing `install.sh` and backs up
+existing tmux or Herdr configuration files with an `.old` suffix before
+replacing them. You can choose another directory at the prompt.
 
 ```sh
 ./install.sh
