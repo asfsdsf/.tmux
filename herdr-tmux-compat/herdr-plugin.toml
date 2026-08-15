@@ -1,8 +1,8 @@
 id = "zky.tmux-compat"
 name = "Tmux Compatibility"
-version = "0.4.0"
-min_herdr_version = "0.7.5"
-description = "Exact tmux-style pane chooser and most-recent-tab switching"
+version = "0.7.0"
+min_herdr_version = "0.8.0"
+description = "Tmux-style pane chooser, recent-tab switching, and clean copy view"
 platforms = ["macos"]
 
 [[actions]]
@@ -16,6 +16,12 @@ id = "last-tab"
 title = "Switch to most recent tab"
 contexts = ["global"]
 command = ["sh", "scripts/last-tab"]
+
+[[actions]]
+id = "toggle-clean-copy-view"
+title = "Toggle clean pane copy view"
+contexts = ["global"]
+command = ["sh", "scripts/toggle-clean-copy-view"]
 
 [[events]]
 on = "tab.focused"

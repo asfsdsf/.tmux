@@ -50,12 +50,19 @@ cycle_pane_next = "prefix+o"
 last_pane = "prefix+semicolon"
 close_pane = "prefix+x"
 zoom = "prefix+z"
+toggle_sidebar = "prefix+b"
 
 # Copy, resize, and configuration controls.
 copy_mode = ["prefix+enter", "prefix+[", "alt+u"]
 resize_mode = "prefix+shift+r"
 reload_config = "prefix+r"
 edit_scrollback = "prefix+alt+e"
+
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+description = "Toggle clean pane copy view"
+command = "zky.tmux-compat.toggle-clean-copy-view"
 
 # Exact tmux semantics supplied by the local compatibility plugin:
 #   w   -> choose-tree across every pane
@@ -210,6 +217,20 @@ height = 7
 [ui]
 # Keep the persistent agent overview, but use compact one-line rows.
 pane_gaps = false
+pane_borders = true
+pane_scrollbars = true
+
+# Keep Herdr's mouse UI enabled by default. Ctrl-a m toggles this at runtime
+# so the outer terminal can handle ordinary drag selection when needed.
+mouse_capture = true
+copy_on_select = true
+
+# Ctrl-a b must remove the sidebar completely for clean outer-terminal
+# selection; Ghostty uses it as part of Ctrl-a m.
+sidebar_collapsed_mode = "hidden"
+
+# A single-tab workspace should not leave a tab row in clean copy view.
+hide_tab_bar_when_single_tab = true
 
 agent_panel_sort = "spaces"
 [experimental]

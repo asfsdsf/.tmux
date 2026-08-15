@@ -1,0 +1,221 @@
+#!/bin/sh
+
+set -eu
+
+config_path=${HERDR_CONFIG_PATH:-${HOME}/.config/herdr/config.toml}
+herdr_bin=${HERDR_BIN_PATH:-herdr}
+plugin_id=zky.tmux-compat
+pane_id=${HERDR_ACTIVE_PANE_ID:-}
+
+if [ ! -f "$config_path" ]; then
+  printf 'Herdr config not found: %s\n' "$config_path" >&2
+  exit 1
+fi
+
+state_dir=${HERDR_CLEAN_COPY_STATE_DIR:-$(
+  "$herdr_bin" plugin config-dir "$plugin_id"
+)}
+mkdir -p "$state_dir"
+state_path=$state_dir/clean-copy-view.state
+
+temp_path=$(mktemp "${TMPDIR:-/tmp}/herdr-config.XXXXXX")
+trap 'rm -f "$temp_path"' EXIT HUP INT TERM
+
+read_ui_bool() {
+  awk -v key="$1" -v default_value="$2" '
+BEGIN { in_ui = 0; value = default_value }
+/^[[:space:]]*\[ui\][[:space:]]*(#.*)?$/ { in_ui = 1; next }
+/^[[:space:]]*\[/ { in_ui = 0 }
+in_ui && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+  if ($0 ~ /=[[:space:]]*false([[:space:]]*(#.*)?)?$/) value = "false"
+  else value = "true"
+}
+END { print value }
+' "$config_path"
+}
+
+current_mouse=$(read_ui_bool mouse_capture true)
+current_borders=$(read_ui_bool pane_borders true)
+current_scrollbars=$(read_ui_bool pane_scrollbars true)
+
+toggle_ghostty_mouse_reporting() {
+  if [ "${HERDR_CLEAN_COPY_SKIP_GHOSTTY_MOUSE:-false}" = "true" ]; then
+    return 0
+  fi
+  if [ "$(uname -s)" != "Darwin" ] || ! command -v osascript >/dev/null 2>&1; then
+    return 0
+  fi
+  osascript <<'APPLESCRIPT' >/dev/null 2>&1
+tell application "Ghostty"
+  set targetTerminal to focused terminal of selected tab of front window
+  perform action "toggle_mouse_reporting" on targetTerminal
+end tell
+APPLESCRIPT
+}
+
+if [ -f "$state_path" ]; then
+  mode=disabled
+  saved_pane=$(sed -n '1p' "$state_path")
+  saved_zoom=$(sed -n '2p' "$state_path")
+  target_mouse=$(sed -n '3p' "$state_path")
+  state_version=$(sed -n '4p' "$state_path")
+  target_borders=$(sed -n '5p' "$state_path")
+  target_scrollbars=$(sed -n '6p' "$state_path")
+
+  # A config write after clean view was enabled means another control changed
+  # mouse behavior. Preserve that newer value instead of restoring stale state.
+  if { [ "$state_version" != "v2" ] &&
+       [ "$state_version" != "v3" ] &&
+       [ "$state_version" != "v4" ] &&
+       [ "$state_version" != "v5" ]; } ||
+     [ "$config_path" -nt "$state_path" ]; then
+    target_mouse=$current_mouse
+  fi
+
+  # v2 state predates border tracking; Herdr's default border setting was on.
+  if [ "$state_version" != "v3" ] &&
+     [ "$state_version" != "v4" ] &&
+     [ "$state_version" != "v5" ]; then
+    target_borders=true
+  fi
+  if [ "$state_version" != "v4" ] && [ "$state_version" != "v5" ]; then
+    target_scrollbars=true
+  fi
+
+  case "$target_mouse" in
+    true|false) ;;
+    *) target_mouse=$current_mouse ;;
+  esac
+  case "$target_borders" in
+    true|false) ;;
+    *) target_borders=true ;;
+  esac
+  case "$target_scrollbars" in
+    true|false) ;;
+    *) target_scrollbars=true ;;
+  esac
+
+  if [ "$saved_zoom" = "false" ] && [ -n "$saved_pane" ]; then
+    "$herdr_bin" pane zoom "$saved_pane" --off >/dev/null 2>&1 || true
+  fi
+
+  # v5 is the first state format that toggles Ghostty's application mouse
+  # reporting. Older state must not invert an unrelated host-terminal mode.
+  if [ "$state_version" = "v5" ]; then
+    toggle_ghostty_mouse_reporting || true
+  fi
+else
+  mode=enabled
+  target_mouse=false
+  target_borders=false
+  target_scrollbars=false
+
+  if [ -n "$pane_id" ]; then
+    layout=$("$herdr_bin" pane layout --pane "$pane_id")
+    saved_zoom=$(printf '%s\n' "$layout" | jq -r '.result.layout.zoomed // false')
+    printf '%s\n%s\n%s\nv5\n%s\n%s\n' \
+      "$pane_id" "$saved_zoom" "$current_mouse" "$current_borders" \
+      "$current_scrollbars" \
+      >"$state_path"
+    "$herdr_bin" pane zoom "$pane_id" --on >/dev/null
+  else
+    printf '\nfalse\n%s\nv5\n%s\n%s\n' \
+      "$current_mouse" "$current_borders" "$current_scrollbars" \
+      >"$state_path"
+    "$herdr_bin" pane zoom --current --on >/dev/null
+  fi
+  toggle_ghostty_mouse_reporting || true
+fi
+
+# Set clean-view UI values while preserving the rest of the user's TOML,
+# including comments and a symlinked config path.
+awk -v mouse="$target_mouse" -v borders="$target_borders" \
+    -v scrollbars="$target_scrollbars" '
+function add_keys() {
+  if (!mouse_found) {
+    print "mouse_capture = " mouse
+    mouse_found = 1
+  }
+  if (!borders_found) {
+    print "pane_borders = " borders
+    borders_found = 1
+  }
+  if (!scrollbars_found) {
+    print "pane_scrollbars = " scrollbars
+    scrollbars_found = 1
+  }
+}
+
+BEGIN {
+  in_ui = 0
+  ui_seen = 0
+  mouse_found = 0
+  borders_found = 0
+  scrollbars_found = 0
+}
+
+/^[[:space:]]*\[ui\][[:space:]]*(#.*)?$/ {
+  in_ui = 1
+  ui_seen = 1
+  print
+  next
+}
+
+/^[[:space:]]*\[/ {
+  if (in_ui) add_keys()
+  in_ui = 0
+  print
+  next
+}
+
+{
+  if (in_ui && $0 ~ /^[[:space:]]*mouse_capture[[:space:]]*=/) {
+    sub(/=[[:space:]]*(true|false)/, "= " mouse)
+    print
+    mouse_found = 1
+    next
+  }
+  if (in_ui && $0 ~ /^[[:space:]]*pane_borders[[:space:]]*=/) {
+    sub(/=[[:space:]]*(true|false)/, "= " borders)
+    print
+    borders_found = 1
+    next
+  }
+  if (in_ui && $0 ~ /^[[:space:]]*pane_scrollbars[[:space:]]*=/) {
+    sub(/=[[:space:]]*(true|false)/, "= " scrollbars)
+    print
+    scrollbars_found = 1
+    next
+  }
+  print
+}
+
+END {
+  if (in_ui) add_keys()
+  if (!ui_seen) {
+    print ""
+    print "[ui]"
+    print "mouse_capture = " mouse
+    print "pane_borders = " borders
+    print "pane_scrollbars = " scrollbars
+  }
+}
+' "$config_path" >"$temp_path"
+
+cat "$temp_path" >"$config_path"
+
+if "$herdr_bin" server reload-config >/dev/null 2>&1; then
+  if [ "$mode" = "disabled" ]; then
+    rm -f "$state_path"
+  else
+    # The marker must be newer than our own config write. A later config edit
+    # can then be recognized as an external mouse-mode change on exit.
+    touch "$state_path"
+  fi
+  "$herdr_bin" notification show "Clean pane copy view $mode" \
+    --body "Use Ctrl-a m to toggle the view." \
+    --sound none >/dev/null 2>&1 || true
+else
+  printf 'Updated %s, but Herdr server reload failed.\n' "$config_path" >&2
+  exit 1
+fi

@@ -110,6 +110,7 @@ Useful shortcuts:
 | `Ctrl-a 1` … `9` | Select a tab by number |
 | `Ctrl-a x` | Close a pane |
 | `Ctrl-a z` | Zoom a pane |
+| `Ctrl-a m` | Toggle clean pane copy view |
 | `Ctrl-a r` | Reload the configuration |
 | `Ctrl-a e` | Edit the configuration |
 
@@ -122,6 +123,16 @@ To copy text:
 
 With `herdr --remote`, copied text is forwarded to the local clipboard through
 OSC 52. The local terminal must allow OSC 52 clipboard access.
+
+In Ghostty, `Ctrl-a m` temporarily zooms the focused pane, completely hides
+Herdr's sidebar, pane borders, and pane scrollbar, and disables Ghostty mouse
+reporting so the wheel scrolls terminal scrollback instead of reaching the pane
+application. Drag-select and copy normally, then press `Ctrl-a m` again to
+restore the previous view and mouse handling. If Herdr mouse capture is changed
+separately while this view is active, that newer setting is preserved when the
+view closes. Pane applications can still receive mouse input in terminals other
+than Ghostty; hold Shift while selecting or use copy mode (`Ctrl-a Enter`, then
+`v`/Space and `y`) for those applications.
 
 In the `Ctrl-a w` picker, use `j`/`k` to move, `h`/`l` to
 collapse/expand, `Enter` to select, and `q` or `Escape` to cancel.
