@@ -129,7 +129,7 @@ prompt_config_dir() {
     fi
 
     if [ "$install_herdr" -eq 1 ]; then
-      for required_file in herdr.toml herdr-tmux-compat/herdr-plugin.toml; do
+      for required_file in herdr/config.toml herdr/tmux-compat/herdr-plugin.toml; do
         if [ ! -f "$config_dir/$required_file" ]; then
           missing_files="$missing_files $required_file"
         fi
@@ -180,7 +180,7 @@ plan_backups() {
   fi
 
   if [ "$install_herdr" -eq 1 ]; then
-    desired_herdr_target=$config_dir/herdr.toml
+    desired_herdr_target=$config_dir/herdr/config.toml
     current_herdr_target=
     if [ -L "$herdr_config_path" ]; then
       current_herdr_target=$(readlink "$herdr_config_path")
@@ -270,7 +270,7 @@ install_herdr_config() {
     return 0
   fi
 
-  HERDR_CONFIG_PATH=$config_dir/herdr.toml herdr config check
+  HERDR_CONFIG_PATH=$config_dir/herdr/config.toml herdr config check
 
   mkdir -p "$HOME/.config/herdr"
   if [ -n "$herdr_backup_path" ]; then
@@ -278,13 +278,13 @@ install_herdr_config() {
   fi
 
   if [ "$link_herdr_config" -eq 1 ]; then
-    ln -s "$config_dir/herdr.toml" "$herdr_config_path"
+    ln -s "$config_dir/herdr/config.toml" "$herdr_config_path"
     printf 'Linked Herdr configuration: %s\n' "$herdr_config_path"
   else
     printf 'Herdr configuration link is already current.\n'
   fi
 
-  herdr plugin link "$config_dir/herdr-tmux-compat" --enabled >/dev/null
+  herdr plugin link "$config_dir/herdr/tmux-compat" --enabled >/dev/null
   printf 'Linked and enabled the local Herdr compatibility plugin.\n'
   if herdr server reload-config >/dev/null 2>&1; then
     printf 'Reloaded the running Herdr server.\n'

@@ -1,52 +1,41 @@
-# tmux and Herdr setup
+# tmux configuration
 
-The configuration directory can be stored anywhere. In the examples below,
-replace `/path/to/tmux` with the directory containing this README. Both tmux
-and Herdr use `Ctrl-a` as the prefix key.
+This repository contains a tmux setup and a matching Herdr configuration. Both
+use `Ctrl-a` as the prefix key.
 
-## Interactive installation
+## Installer
 
-Run the installer and use its checkbox-style menu to install tmux, Herdr, or
-both. It automatically uses the directory containing `install.sh` and backs up
-existing tmux or Herdr configuration files with an `.old` suffix before
-replacing them. You can choose another directory at the prompt.
+Run the interactive installer from the repository root and select tmux, Herdr,
+or both:
 
 ```sh
 ./install.sh
 ```
 
+The installer adds missing Homebrew packages, backs up existing configuration
+files with an `.old` suffix, and links the selected configuration.
+
 ## tmux
 
-### Install
+For a manual installation:
 
 ```sh
 brew install tmux
 ```
 
-### Set up
-
-Add these lines to `~/.tmux.conf`:
+Add these lines to `~/.tmux.conf`, replacing `/path/to/tmux` with this
+repository's path:
 
 ```tmux
 source-file "/path/to/tmux/tmux.conf"
 source-file "/path/to/tmux/white_black_color"
 ```
 
-Reload the configuration:
+Reload a running tmux server:
 
 ```sh
 tmux source-file ~/.tmux.conf
 ```
-
-### Use
-
-Start tmux:
-
-```sh
-tmux
-```
-
-Useful shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
@@ -61,78 +50,5 @@ Useful shortcuts:
 
 ## Herdr
 
-### Install
-
-```sh
-brew install herdr jq python
-```
-
-### Set up
-
-Point Herdr at the configuration in this directory:
-
-```sh
-mkdir -p ~/.config/herdr
-ln -sfn "/path/to/tmux/herdr.toml" ~/.config/herdr/config.toml
-```
-
-Install the local tmux-compatibility plugin:
-
-```sh
-herdr plugin link "/path/to/tmux/herdr-tmux-compat" --enabled
-herdr server reload-config
-```
-
-### Use
-
-Start Herdr:
-
-```sh
-herdr
-```
-
-Connect to a remote server from the local computer:
-
-```sh
-herdr --remote user@server
-```
-
-Useful shortcuts:
-
-| Shortcut | Action |
-| --- | --- |
-| `Ctrl-a c` | Create a tab |
-| `Ctrl-a /` | Split to the right |
-| `Ctrl-a -` | Split below |
-| `Ctrl-a h/j/k/l` | Move between panes |
-| `Ctrl-a w` | Choose a workspace, tab, or pane |
-| `Ctrl-a Tab` | Return to the most recently used tab |
-| `Ctrl-a 1` … `9` | Select a tab by number |
-| `Ctrl-a x` | Close a pane |
-| `Ctrl-a z` | Zoom a pane |
-| `Ctrl-a m` | Toggle clean pane copy view |
-| `Ctrl-a r` | Reload the configuration |
-| `Ctrl-a e` | Edit the configuration |
-
-To copy text:
-
-1. Press `Ctrl-a Enter`.
-2. Move with vi keys and press `v` to start selecting.
-3. Press `y` to copy.
-4. Paste locally with `Cmd-v`.
-
-With `herdr --remote`, copied text is forwarded to the local clipboard through
-OSC 52. The local terminal must allow OSC 52 clipboard access.
-
-In Ghostty, `Ctrl-a m` temporarily zooms the focused pane, completely hides
-Herdr's sidebar, pane borders, and pane scrollbar, and disables Ghostty mouse
-reporting so the wheel scrolls terminal scrollback instead of reaching the pane
-application. Drag-select and copy normally, then press `Ctrl-a m` again to
-restore the previous view and mouse handling. If Herdr mouse capture is changed
-separately while this view is active, that newer setting is preserved when the
-view closes. Pane applications can still receive mouse input in terminals other
-than Ghostty; hold Shift while selecting or use copy mode (`Ctrl-a Enter`, then
-`v`/Space and `y`) for those applications.
-
-In the `Ctrl-a w` picker, use `j`/`k` to move, `h`/`l` to
-collapse/expand, `Enter` to select, and `q` or `Escape` to cancel.
+The Herdr configuration, plugin, installation steps, and shortcuts are in
+[herdr/README.md](herdr/README.md).
