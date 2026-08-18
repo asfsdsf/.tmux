@@ -1,6 +1,6 @@
 # Herdr configuration
 
-This directory provides a tmux-style Herdr setup for macOS:
+This directory provides a tmux-style Herdr setup for Linux and macOS:
 
 - `config.toml` defines the `Ctrl-a` keymap and interface settings.
 - `tmux-compat/` adds the pane picker, most-recent-tab switching, and clean copy
@@ -8,11 +8,28 @@ This directory provides a tmux-style Herdr setup for macOS:
 
 ## Install
 
-From the repository root, run `./install.sh` and select Herdr. For a manual
-installation, replace `/path/to/tmux` with the repository path:
+From the repository root, run `./install.sh` and select Herdr. The installer
+uses Homebrew on macOS and a supported native package manager plus Herdr's
+official release installer on Linux.
+
+For a manual Linux installation:
+
+```sh
+sudo apt-get install jq python3 curl
+curl -fsSL https://herdr.dev/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+On macOS with Homebrew:
 
 ```sh
 brew install herdr jq python
+```
+
+Then replace `/path/to/tmux` with the repository path and link the
+configuration and plugin:
+
+```sh
 mkdir -p ~/.config/herdr
 ln -sfn "/path/to/tmux/herdr/config.toml" ~/.config/herdr/config.toml
 herdr plugin link "/path/to/tmux/herdr/tmux-compat" --enabled
@@ -60,4 +77,6 @@ add this binding so `Ctrl-a m` also hides the Herdr sidebar:
 keybind = ctrl+a>m=text:\x01b\x01m
 ```
 
-Press `Ctrl-a m` again to restore the previous layout and mouse settings.
+Press `Ctrl-a m` again to restore the previous layout and mouse settings. On
+macOS, the helper also toggles Ghostty application mouse reporting. On Linux,
+hold Shift while selecting if the program inside the pane captures the mouse.

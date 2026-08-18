@@ -215,7 +215,112 @@ confirm_installation() {
   esac
 }
 
-install_packages() {
+run_as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    die "sudo is required to install system packages: $*"
+  fi
+}
+
+install_linux_packages() {
+  need_tmux=0
+  need_jq=0
+  need_python=0
+  need_curl=0
+  need_awk=0
+  need_sha256=0
+
+  [ "$install_tmux" -eq 0 ] || command -v tmux >/dev/null 2>&1 || need_tmux=1
+  if [ "$install_herdr" -eq 1 ]; then
+    command -v jq >/dev/null 2>&1 || need_jq=1
+    command -v python3 >/dev/null 2>&1 || need_python=1
+    command -v curl >/dev/null 2>&1 || need_curl=1
+    command -v awk >/dev/null 2>&1 || need_awk=1
+    if ! command -v sha256sum >/dev/null 2>&1 &&
+       ! command -v shasum >/dev/null 2>&1 &&
+       ! command -v openssl >/dev/null 2>&1; then
+      need_sha256=1
+    fi
+  fi
+
+  if [ "$need_tmux" -eq 0 ] && [ "$need_jq" -eq 0 ] &&
+     [ "$need_python" -eq 0 ] && [ "$need_curl" -eq 0 ] &&
+     [ "$need_awk" -eq 0 ] && [ "$need_sha256" -eq 0 ]; then
+    return
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    set -- apt-get
+    python_package=python3
+    awk_package=gawk
+  elif command -v dnf >/dev/null 2>&1; then
+    set -- dnf
+    python_package=python3
+    awk_package=gawk
+  elif command -v yum >/dev/null 2>&1; then
+    set -- yum
+    python_package=python3
+    awk_package=gawk
+  elif command -v pacman >/dev/null 2>&1; then
+    set -- pacman
+    python_package=python
+    awk_package=gawk
+  elif command -v zypper >/dev/null 2>&1; then
+    set -- zypper
+    python_package=python3
+    awk_package=gawk
+  elif command -v apk >/dev/null 2>&1; then
+    set -- apk
+    python_package=python3
+    awk_package=gawk
+  else
+    die 'no supported Linux package manager found (apt, dnf, yum, pacman, zypper, or apk)'
+  fi
+  package_manager=$1
+
+  set --
+  [ "$need_tmux" -eq 0 ] || set -- "$@" tmux
+  [ "$need_jq" -eq 0 ] || set -- "$@" jq
+  [ "$need_python" -eq 0 ] || set -- "$@" "$python_package"
+  [ "$need_curl" -eq 0 ] || set -- "$@" curl
+  [ "$need_awk" -eq 0 ] || set -- "$@" "$awk_package"
+  [ "$need_sha256" -eq 0 ] || set -- "$@" coreutils
+
+  printf 'Installing system packages with %s:%s\n' "$package_manager" " $*"
+  case $package_manager in
+    apt-get)
+      run_as_root apt-get update
+      run_as_root apt-get install -y "$@"
+      ;;
+    dnf | yum)
+      run_as_root "$package_manager" install -y "$@"
+      ;;
+    pacman)
+      run_as_root pacman -S --needed --noconfirm "$@"
+      ;;
+    zypper)
+      run_as_root zypper --non-interactive install "$@"
+      ;;
+    apk)
+      run_as_root apk add "$@"
+      ;;
+  esac
+}
+
+install_herdr_release() {
+  herdr_install_dir=${HERDR_INSTALL_DIR:-$HOME/.local/bin}
+  printf 'Installing Herdr with the official release installer.\n'
+  curl -fsSL https://herdr.dev/install.sh | sh
+  PATH=$herdr_install_dir:$PATH
+  export PATH
+  command -v herdr >/dev/null 2>&1 || \
+    die "Herdr was installed to $herdr_install_dir, but the executable was not found"
+}
+
+install_packages_macos() {
   set --
 
   if [ "$install_tmux" -eq 1 ] && ! command -v tmux >/dev/null 2>&1; then
@@ -238,6 +343,23 @@ install_packages() {
 
   printf 'Installing with Homebrew:%s\n' " $*"
   brew install "$@"
+}
+
+install_packages() {
+  case $(uname -s) in
+    Darwin)
+      install_packages_macos
+      ;;
+    Linux)
+      install_linux_packages
+      if [ "$install_herdr" -eq 1 ] && ! command -v herdr >/dev/null 2>&1; then
+        install_herdr_release
+      fi
+      ;;
+    *)
+      die "unsupported operating system: $(uname -s)"
+      ;;
+  esac
 }
 
 install_tmux_config() {

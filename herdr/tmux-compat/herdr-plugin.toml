@@ -1,9 +1,9 @@
 id = "zky.tmux-compat"
 name = "Tmux Compatibility"
-version = "0.7.0"
+version = "0.7.1"
 min_herdr_version = "0.8.0"
 description = "Tmux-style pane chooser, recent-tab switching, and clean copy view"
-platforms = ["macos"]
+platforms = ["linux", "macos"]
 
 [[actions]]
 id = "choose-pane"

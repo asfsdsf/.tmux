@@ -12,8 +12,9 @@ or both:
 ./install.sh
 ```
 
-The installer adds missing Homebrew packages, backs up existing configuration
-files with an `.old` suffix, and links the selected configuration.
+The installer supports macOS and Linux. It installs missing packages, backs up
+existing configuration files with an `.old` suffix, and links the selected
+configuration.
 
 ## tmux
 
