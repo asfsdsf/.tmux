@@ -1,5 +1,5 @@
 # Herdr configuration modeled after tmux.conf in this repository.
-# ~/.config/herdr/config.toml links to this file.
+# The active Herdr config path links to this file.
 
 onboarding = false
 

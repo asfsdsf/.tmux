@@ -7,6 +7,9 @@ set -eu
 default_config_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd -P) || exit 1
 install_tmux=1
 install_herdr=1
+install_tmux_program=0
+install_herdr_program=0
+prepare_herdr_runtime=0
 
 die() {
   printf 'Error: %s\n' "$*" >&2
@@ -15,6 +18,25 @@ die() {
 
 path_exists() {
   [ -e "$1" ] || [ -L "$1" ]
+}
+
+absolute_path() {
+  absolute_input=$1
+  case $absolute_input in
+    /*) absolute_result=$absolute_input ;;
+    *) absolute_result=$PWD/$absolute_input ;;
+  esac
+
+  absolute_parent=$(dirname "$absolute_result")
+  absolute_tail=$(basename "$absolute_result")
+  while [ ! -d "$absolute_parent" ]; do
+    absolute_tail=$(basename "$absolute_parent")/$absolute_tail
+    absolute_parent=$(dirname "$absolute_parent")
+  done
+  absolute_parent=$(CDPATH='' cd "$absolute_parent" && pwd -P) || return 1
+  absolute_result=$absolute_parent/$absolute_tail
+
+  printf '%s\n' "$absolute_result"
 }
 
 checkbox() {
@@ -155,7 +177,9 @@ tmux_config_contents() {
 
 plan_backups() {
   tmux_config_path=$HOME/.tmux.conf
-  herdr_config_path=$HOME/.config/herdr/config.toml
+  herdr_config_path=$(absolute_path \
+    "${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}")
+  desired_herdr_target=$(absolute_path "$config_dir/herdr/config.toml")
   tmux_backup_path=
   herdr_backup_path=
   write_tmux_config=0
@@ -180,10 +204,18 @@ plan_backups() {
   fi
 
   if [ "$install_herdr" -eq 1 ]; then
-    desired_herdr_target=$config_dir/herdr/config.toml
     current_herdr_target=
-    if [ -L "$herdr_config_path" ]; then
+    if [ "$herdr_config_path" = "$desired_herdr_target" ]; then
+      current_herdr_target=$desired_herdr_target
+    elif [ -L "$herdr_config_path" ]; then
       current_herdr_target=$(readlink "$herdr_config_path")
+      case $current_herdr_target in
+        /*) ;;
+        *)
+          current_herdr_target="$(dirname "$herdr_config_path")/$current_herdr_target"
+          ;;
+      esac
+      current_herdr_target=$(absolute_path "$current_herdr_target")
     fi
 
     if [ "$current_herdr_target" != "$desired_herdr_target" ]; then
@@ -215,6 +247,50 @@ confirm_installation() {
   esac
 }
 
+prompt_program_installation() {
+  prompt_program_name=$1
+  while :; do
+    printf '%s is not installed. Install it now? [Y/n]: ' "$prompt_program_name"
+    IFS= read -r prompt_program_choice || exit 1
+    case $prompt_program_choice in
+      '' | y | Y | yes | YES | Yes)
+        return 0
+        ;;
+      n | N | no | NO | No)
+        return 1
+        ;;
+      *)
+        printf 'Enter y to install or n to skip.\n'
+        ;;
+    esac
+  done
+}
+
+choose_program_installation() {
+  install_tmux_program=0
+  install_herdr_program=0
+  prepare_herdr_runtime=0
+
+  if [ "$install_tmux" -eq 1 ] && ! command -v tmux >/dev/null 2>&1; then
+    if prompt_program_installation tmux; then
+      install_tmux_program=1
+    else
+      printf 'Skipping tmux program installation; its configuration will still be installed.\n'
+    fi
+  fi
+
+  if [ "$install_herdr" -eq 1 ]; then
+    if command -v herdr >/dev/null 2>&1; then
+      prepare_herdr_runtime=1
+    elif prompt_program_installation Herdr; then
+      install_herdr_program=1
+      prepare_herdr_runtime=1
+    else
+      printf 'Skipping Herdr program installation; its configuration will still be installed.\n'
+    fi
+  fi
+}
+
 run_as_root() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
@@ -233,10 +309,12 @@ install_linux_packages() {
   need_awk=0
   need_sha256=0
 
-  [ "$install_tmux" -eq 0 ] || command -v tmux >/dev/null 2>&1 || need_tmux=1
-  if [ "$install_herdr" -eq 1 ]; then
+  [ "$install_tmux_program" -eq 0 ] || need_tmux=1
+  if [ "$prepare_herdr_runtime" -eq 1 ]; then
     command -v jq >/dev/null 2>&1 || need_jq=1
     command -v python3 >/dev/null 2>&1 || need_python=1
+  fi
+  if [ "$install_herdr_program" -eq 1 ]; then
     command -v curl >/dev/null 2>&1 || need_curl=1
     command -v awk >/dev/null 2>&1 || need_awk=1
     if ! command -v sha256sum >/dev/null 2>&1 &&
@@ -323,18 +401,17 @@ install_herdr_release() {
 install_packages_macos() {
   set --
 
-  if [ "$install_tmux" -eq 1 ] && ! command -v tmux >/dev/null 2>&1; then
+  if [ "$install_tmux_program" -eq 1 ]; then
     set -- "$@" tmux
   fi
 
-  if [ "$install_herdr" -eq 1 ]; then
-    command -v herdr >/dev/null 2>&1 || set -- "$@" herdr
+  if [ "$prepare_herdr_runtime" -eq 1 ]; then
+    [ "$install_herdr_program" -eq 0 ] || set -- "$@" herdr
     command -v jq >/dev/null 2>&1 || set -- "$@" jq
     command -v python3 >/dev/null 2>&1 || set -- "$@" python
   fi
 
   if [ "$#" -eq 0 ]; then
-    printf 'Required programs are already installed.\n'
     return
   fi
 
@@ -352,7 +429,7 @@ install_packages() {
       ;;
     Linux)
       install_linux_packages
-      if [ "$install_herdr" -eq 1 ] && ! command -v herdr >/dev/null 2>&1; then
+      if [ "$install_herdr_program" -eq 1 ]; then
         install_herdr_release
       fi
       ;;
@@ -378,7 +455,9 @@ install_tmux_config() {
     printf 'tmux configuration is already current.\n'
   fi
 
-  if tmux list-sessions >/dev/null 2>&1; then
+  if ! command -v tmux >/dev/null 2>&1; then
+    printf 'tmux is not installed; the configuration is ready for later use.\n'
+  elif tmux list-sessions >/dev/null 2>&1; then
     if tmux source-file "$tmux_config_path"; then
       printf 'Reloaded the running tmux server.\n'
     else
@@ -392,26 +471,38 @@ install_herdr_config() {
     return 0
   fi
 
-  HERDR_CONFIG_PATH=$config_dir/herdr/config.toml herdr config check
+  herdr_available=0
+  if command -v herdr >/dev/null 2>&1; then
+    HERDR_CONFIG_PATH=$desired_herdr_target herdr config check
+    herdr_available=1
+  fi
 
-  mkdir -p "$HOME/.config/herdr"
+  mkdir -p "$(dirname "$herdr_config_path")"
   if [ -n "$herdr_backup_path" ]; then
     mv "$herdr_config_path" "$herdr_backup_path"
   fi
 
   if [ "$link_herdr_config" -eq 1 ]; then
-    ln -s "$config_dir/herdr/config.toml" "$herdr_config_path"
+    ln -s "$desired_herdr_target" "$herdr_config_path"
     printf 'Linked Herdr configuration: %s\n' "$herdr_config_path"
   else
-    printf 'Herdr configuration link is already current.\n'
+    printf 'Herdr configuration path is already current: %s\n' \
+      "$herdr_config_path"
   fi
 
-  herdr plugin link "$config_dir/herdr/tmux-compat" --enabled >/dev/null
-  printf 'Linked and enabled the local Herdr compatibility plugin.\n'
-  if herdr server reload-config >/dev/null 2>&1; then
-    printf 'Reloaded the running Herdr server.\n'
+  if [ "$herdr_available" -eq 0 ]; then
+    printf 'Herdr is not installed; the configuration is ready for later use.\n'
+    printf 'After installing Herdr, rerun this installer to validate the config and link the plugin.\n'
   else
-    printf 'Herdr will load the configuration when it starts.\n'
+    HERDR_CONFIG_PATH=$herdr_config_path \
+      herdr plugin link "$config_dir/herdr/tmux-compat" --enabled >/dev/null
+    printf 'Linked and enabled the local Herdr compatibility plugin.\n'
+    if HERDR_CONFIG_PATH=$herdr_config_path \
+      herdr server reload-config >/dev/null 2>&1; then
+      printf 'Reloaded the running Herdr server.\n'
+    else
+      printf 'Herdr will load the configuration when it starts.\n'
+    fi
   fi
 }
 
@@ -423,6 +514,7 @@ prompt_components
 prompt_config_dir
 plan_backups
 confirm_installation
+choose_program_installation
 install_packages
 install_tmux_config
 install_herdr_config

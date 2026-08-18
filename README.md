@@ -12,9 +12,10 @@ or both:
 ./install.sh
 ```
 
-The installer supports macOS and Linux. It installs missing packages, backs up
-existing configuration files with an `.old` suffix, and links the selected
-configuration.
+The installer supports macOS and Linux. It asks before installing a missing
+tmux or Herdr executable, so either program may be installed manually later.
+Skipping a program does not skip its configuration. Existing configuration
+files are backed up with an `.old` suffix.
 
 ## tmux
 

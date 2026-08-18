@@ -10,7 +10,9 @@ This directory provides a tmux-style Herdr setup for Linux and macOS:
 
 From the repository root, run `./install.sh` and select Herdr. The installer
 uses Homebrew on macOS and a supported native package manager plus Herdr's
-official release installer on Linux.
+official release installer on Linux. If Herdr is missing, it asks before
+installing it. Choosing skip still links the configuration; rerun the installer
+after installing Herdr manually to validate the config and link the plugin.
 
 For a manual Linux installation:
 
@@ -36,6 +38,22 @@ herdr plugin link "/path/to/tmux/herdr/tmux-compat" --enabled
 herdr config check
 herdr server reload-config
 ```
+
+### Custom config path
+
+Herdr uses `HERDR_CONFIG_PATH` as the complete config filename when it is set.
+Export it before running the installer and whenever you start Herdr:
+
+```sh
+export HERDR_CONFIG_PATH="$HOME/.config/herdr-work/config.toml"
+./install.sh
+herdr
+```
+
+The installer creates the parent directory and links that path to this
+repository's `herdr/config.toml`. Existing files are backed up before the link
+is created. If the variable already points directly to the repository config,
+no link is needed.
 
 Start Herdr with `herdr`, or connect to a remote server with:
 
