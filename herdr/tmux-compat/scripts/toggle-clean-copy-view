@@ -91,6 +91,22 @@ END { print value }
 ' "$config_path"
 }
 
+read_ui_sidebar_mode() {
+  awk '
+BEGIN { in_ui = 0; value = "compact" }
+/^[[:space:]]*\[ui\][[:space:]]*(#.*)?$/ { in_ui = 1; next }
+/^[[:space:]]*\[/ { in_ui = 0 }
+in_ui && $0 ~ /^[[:space:]]*sidebar_collapsed_mode[[:space:]]*=/ {
+  line = $0
+  sub(/^[^=]*=[[:space:]]*/, "", line)
+  sub(/[[:space:]]*(#.*)?$/, "", line)
+  if (line == "\"compact\"") value = "compact"
+  else if (line == "\"hidden\"") value = "hidden"
+}
+END { print value }
+' "$config_path"
+}
+
 read_current_ui() {
   current_mouse=$(read_ui_bool mouse_capture true)
   current_borders=$(read_ui_bool pane_borders true)
@@ -98,6 +114,7 @@ read_current_ui() {
   current_sidebar_width=$(read_ui_uint sidebar_width 26)
   current_sidebar_min_width=$(read_ui_uint sidebar_min_width 18)
   current_sidebar_max_width=$(read_ui_uint sidebar_max_width 36)
+  current_sidebar_collapsed_mode=$(read_ui_sidebar_mode)
 }
 
 is_bool() {
@@ -112,6 +129,13 @@ is_u16() {
     *[!0-9]*|'') return 1 ;;
   esac
   [ "$1" -le 65535 ]
+}
+
+is_sidebar_mode() {
+  case "$1" in
+    compact|hidden) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 clamp_width() {
@@ -133,13 +157,15 @@ write_ui_config() {
   write_sidebar_width=$4
   write_sidebar_min_width=$5
   write_sidebar_max_width=$6
+  write_sidebar_collapsed_mode=$7
 
   # Preserve the rest of the TOML, its comments, and a symlinked config path.
   awk -v mouse="$write_mouse" -v borders="$write_borders" \
       -v scrollbars="$write_scrollbars" \
       -v sidebar_width="$write_sidebar_width" \
       -v sidebar_min_width="$write_sidebar_min_width" \
-      -v sidebar_max_width="$write_sidebar_max_width" '
+      -v sidebar_max_width="$write_sidebar_max_width" \
+      -v sidebar_collapsed_mode="$write_sidebar_collapsed_mode" '
 function add_keys() {
   if (!mouse_found) print "mouse_capture = " mouse
   if (!borders_found) print "pane_borders = " borders
@@ -147,14 +173,19 @@ function add_keys() {
   if (!sidebar_width_found) print "sidebar_width = " sidebar_width
   if (!sidebar_min_width_found) print "sidebar_min_width = " sidebar_min_width
   if (!sidebar_max_width_found) print "sidebar_max_width = " sidebar_max_width
+  if (!sidebar_collapsed_mode_found) {
+    print "sidebar_collapsed_mode = \"" sidebar_collapsed_mode "\""
+  }
   mouse_found = borders_found = scrollbars_found = 1
   sidebar_width_found = sidebar_min_width_found = sidebar_max_width_found = 1
+  sidebar_collapsed_mode_found = 1
 }
 
 BEGIN {
   in_ui = ui_seen = 0
   mouse_found = borders_found = scrollbars_found = 0
   sidebar_width_found = sidebar_min_width_found = sidebar_max_width_found = 0
+  sidebar_collapsed_mode_found = 0
 }
 
 /^[[:space:]]*\[ui\][[:space:]]*(#.*)?$/ {
@@ -189,6 +220,9 @@ BEGIN {
   } else if (in_ui && $0 ~ /^[[:space:]]*sidebar_max_width[[:space:]]*=/) {
     sub(/=[[:space:]]*[0-9]+/, "= " sidebar_max_width)
     sidebar_max_width_found = 1
+  } else if (in_ui && $0 ~ /^[[:space:]]*sidebar_collapsed_mode[[:space:]]*=/) {
+    sub(/=[[:space:]]*"[^"]*"/, "= \"" sidebar_collapsed_mode "\"")
+    sidebar_collapsed_mode_found = 1
   }
   print
 }
@@ -298,11 +332,12 @@ if [ ! -f "$state_path" ]; then
     "$current_sidebar_max_width")
 
   state_temp_path=$(mktemp "$state_dir/.clean-copy-view-state.XXXXXX")
-  printf '%s\n%s\n%s\nv6\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+  printf '%s\n%s\n%s\nv7\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
     "$pane_id" "$saved_zoom" "$current_mouse" "$current_borders" \
     "$current_scrollbars" "$current_sidebar_width" \
     "$current_sidebar_min_width" "$current_sidebar_max_width" \
-    "$saved_runtime_sidebar_width" >"$state_temp_path"
+    "$saved_runtime_sidebar_width" "$current_sidebar_collapsed_mode" \
+    >"$state_temp_path"
   mv "$state_temp_path" "$state_path"
   state_temp_path=
 
@@ -315,7 +350,7 @@ if [ ! -f "$state_path" ]; then
     "$herdr_bin" pane zoom --current --on >/dev/null 2>&1 || true
   fi
 
-  write_ui_config false false false 0 0 0
+  write_ui_config false false false 0 0 0 hidden
   if ! "$herdr_bin" server reload-config >/dev/null 2>&1; then
     cat "$backup_path" >"$config_path"
     "$herdr_bin" server reload-config >/dev/null 2>&1 || true
@@ -339,6 +374,16 @@ saved_mouse=$(sed -n '3p' "$state_path")
 state_version=$(sed -n '4p' "$state_path")
 
 case "$state_version" in
+  v7)
+    saved_borders=$(sed -n '5p' "$state_path")
+    saved_scrollbars=$(sed -n '6p' "$state_path")
+    saved_sidebar_width=$(sed -n '7p' "$state_path")
+    saved_sidebar_min_width=$(sed -n '8p' "$state_path")
+    saved_sidebar_max_width=$(sed -n '9p' "$state_path")
+    saved_runtime_sidebar_width=$(sed -n '10p' "$state_path")
+    saved_sidebar_collapsed_mode=$(sed -n '11p' "$state_path")
+    legacy_ghostty=false
+    ;;
   v6)
     saved_borders=$(sed -n '5p' "$state_path")
     saved_scrollbars=$(sed -n '6p' "$state_path")
@@ -346,6 +391,7 @@ case "$state_version" in
     saved_sidebar_min_width=$(sed -n '8p' "$state_path")
     saved_sidebar_max_width=$(sed -n '9p' "$state_path")
     saved_runtime_sidebar_width=$(sed -n '10p' "$state_path")
+    saved_sidebar_collapsed_mode=hidden
     legacy_ghostty=false
     ;;
   v2|v3|v4|v5)
@@ -362,6 +408,7 @@ case "$state_version" in
     saved_runtime_sidebar_width=$(runtime_sidebar_width "$legacy_layout" \
       "$saved_sidebar_width" "$saved_sidebar_min_width" \
       "$saved_sidebar_max_width")
+    saved_sidebar_collapsed_mode=$current_sidebar_collapsed_mode
     [ "$state_version" = v5 ] && legacy_ghostty=true || legacy_ghostty=false
     ;;
   *)
@@ -375,6 +422,8 @@ is_bool "$saved_zoom" || saved_zoom=false
 is_bool "$saved_mouse" || saved_mouse=$current_mouse
 is_bool "$saved_borders" || saved_borders=true
 is_bool "$saved_scrollbars" || saved_scrollbars=true
+is_sidebar_mode "$saved_sidebar_collapsed_mode" || \
+  saved_sidebar_collapsed_mode=$current_sidebar_collapsed_mode
 
 if ! is_u16 "$saved_sidebar_width" ||
    ! is_u16 "$saved_sidebar_min_width" ||
@@ -397,6 +446,7 @@ target_scrollbars=$saved_scrollbars
 target_sidebar_width=$saved_sidebar_width
 target_sidebar_min_width=$saved_sidebar_min_width
 target_sidebar_max_width=$saved_sidebar_max_width
+target_sidebar_collapsed_mode=$saved_sidebar_collapsed_mode
 
 # Preserve explicit changes to managed settings made while clean view was on.
 # Mouse mode keeps the established mtime behavior because another controller
@@ -405,6 +455,8 @@ if [ "$config_path" -nt "$state_path" ]; then
   target_mouse=$current_mouse
   [ "$current_borders" = false ] || target_borders=$current_borders
   [ "$current_scrollbars" = false ] || target_scrollbars=$current_scrollbars
+  [ "$current_sidebar_collapsed_mode" = hidden ] || \
+    target_sidebar_collapsed_mode=$current_sidebar_collapsed_mode
   if { [ "$current_sidebar_width" != 0 ] ||
        [ "$current_sidebar_min_width" != 0 ] ||
        [ "$current_sidebar_max_width" != 0 ]; } &&
@@ -427,7 +479,7 @@ fi
 # restore the user's configured default and bounds without losing that width.
 write_ui_config "$target_mouse" "$target_borders" "$target_scrollbars" \
   "$saved_runtime_sidebar_width" "$saved_runtime_sidebar_width" \
-  "$saved_runtime_sidebar_width"
+  "$saved_runtime_sidebar_width" "$target_sidebar_collapsed_mode"
 if ! "$herdr_bin" server reload-config >/dev/null 2>&1; then
   printf 'Updated %s, but the first Herdr restore reload failed.\n' \
     "$config_path" >&2
@@ -436,7 +488,7 @@ fi
 
 write_ui_config "$target_mouse" "$target_borders" "$target_scrollbars" \
   "$target_sidebar_width" "$target_sidebar_min_width" \
-  "$target_sidebar_max_width"
+  "$target_sidebar_max_width" "$target_sidebar_collapsed_mode"
 if ! "$herdr_bin" server reload-config >/dev/null 2>&1; then
   printf 'Restored %s, but the final Herdr reload failed; Ctrl-a m will retry.\n' \
     "$config_path" >&2

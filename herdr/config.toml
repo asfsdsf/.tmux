@@ -225,12 +225,13 @@ pane_scrollbars = true
 mouse_capture = true
 copy_on_select = true
 
-# Ctrl-a b collapses the sidebar completely. The clean-copy helper temporarily
-# sets all three widths to zero without changing the collapsed/expanded state.
+# Ctrl-a b leaves the compact sidebar strip. The clean-copy helper temporarily
+# switches this to hidden and sets all three widths to zero without changing
+# the collapsed/expanded state.
 sidebar_width = 26
 sidebar_min_width = 18
 sidebar_max_width = 36
-sidebar_collapsed_mode = "hidden"
+sidebar_collapsed_mode = "compact"
 
 # A single-tab workspace should not leave a tab row in clean copy view.
 hide_tab_bar_when_single_tab = true

@@ -90,7 +90,8 @@ terminal permits clipboard access.
 Clean copy view zooms the current pane, hides the sidebar, and temporarily
 disables borders, scrollbars, and Herdr's mouse capture so normal terminal
 selection works. Press `Ctrl-a m` again to restore the previous pane, sidebar,
-and mouse settings.
+collapsed-sidebar presentation, and mouse settings. The ordinary sidebar
+button continues to leave its compact strip visible.
 
 The helper works through Herdr's live configuration on both Linux and macOS;
 it does not need a terminal-specific key binding. Remove this obsolete Ghostty
