@@ -87,14 +87,19 @@ For Herdr copy mode, press `Ctrl-a Enter`, select with vi keys and `v`, then
 press `y`. Remote sessions forward copied text through OSC 52 when the local
 terminal permits clipboard access.
 
-Clean copy view zooms the current pane and temporarily disables borders,
-scrollbars, and mouse capture so normal terminal selection works. In Ghostty,
-add this binding so `Ctrl-a m` also hides the Herdr sidebar:
+Clean copy view zooms the current pane, hides the sidebar, and temporarily
+disables borders, scrollbars, and Herdr's mouse capture so normal terminal
+selection works. Press `Ctrl-a m` again to restore the previous pane, sidebar,
+and mouse settings.
+
+The helper works through Herdr's live configuration on both Linux and macOS;
+it does not need a terminal-specific key binding. Remove this obsolete Ghostty
+binding if it was added for an older version:
 
 ```ini
 keybind = ctrl+a>m=text:\x01b\x01m
 ```
 
-Press `Ctrl-a m` again to restore the previous layout and mouse settings. On
-macOS, the helper also toggles Ghostty application mouse reporting. On Linux,
-hold Shift while selecting if the program inside the pane captures the mouse.
+An application inside the pane can request mouse reporting independently of
+Herdr. Hold Shift while selecting in such applications to use the terminal's
+native selection bypass.

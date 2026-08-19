@@ -5,10 +5,14 @@ set -eu
 config_path=${HERDR_CONFIG_PATH:-${HOME}/.config/herdr/config.toml}
 herdr_bin=${HERDR_BIN_PATH:-herdr}
 plugin_id=zky.tmux-compat
-pane_id=${HERDR_ACTIVE_PANE_ID:-}
+pane_id=${HERDR_ACTIVE_PANE_ID:-${HERDR_PANE_ID:-}}
 
 if [ ! -f "$config_path" ]; then
   printf 'Herdr config not found: %s\n' "$config_path" >&2
+  exit 1
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  printf 'jq is required for the Herdr clean copy view.\n' >&2
   exit 1
 fi
 
@@ -16,10 +20,48 @@ state_dir=${HERDR_CLEAN_COPY_STATE_DIR:-$(
   "$herdr_bin" plugin config-dir "$plugin_id"
 )}
 mkdir -p "$state_dir"
-state_path=$state_dir/clean-copy-view.state
+
+# Plugin state is shared by default. Include the config and socket/session so
+# two Herdr instances cannot restore each other's pane or UI settings.
+state_key=$(
+  {
+    printf 'config=%s\n' "$config_path"
+    printf 'socket=%s\n' "${HERDR_SOCKET_PATH:-}"
+    printf 'session=%s\n' "${HERDR_SESSION:-}"
+  } | cksum | awk '{ print $1 }'
+)
+state_path=$state_dir/clean-copy-view-$state_key.state
+legacy_state_path=$state_dir/clean-copy-view.state
+lock_path=$state_path.lock
+
+if ! mkdir "$lock_path" 2>/dev/null; then
+  lock_pid=$(sed -n '1p' "$lock_path/pid" 2>/dev/null || true)
+  case "$lock_pid" in
+    *[!0-9]*|'') exit 0 ;;
+  esac
+  if kill -0 "$lock_pid" 2>/dev/null; then
+    exit 0
+  fi
+  rm -f "$lock_path/pid"
+  rmdir "$lock_path" 2>/dev/null || exit 0
+  mkdir "$lock_path" 2>/dev/null || exit 0
+fi
+printf '%s\n' "$$" >"$lock_path/pid"
+
+temp_path=
+backup_path=
+state_temp_path=
+cleanup() {
+  [ -z "$temp_path" ] || rm -f "$temp_path"
+  [ -z "$backup_path" ] || rm -f "$backup_path"
+  [ -z "$state_temp_path" ] || rm -f "$state_temp_path"
+  rm -f "$lock_path/pid"
+  rmdir "$lock_path" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 temp_path=$(mktemp "${TMPDIR:-/tmp}/herdr-config.XXXXXX")
-trap 'rm -f "$temp_path"' EXIT HUP INT TERM
 
 read_ui_bool() {
   awk -v key="$1" -v default_value="$2" '
@@ -34,129 +76,89 @@ END { print value }
 ' "$config_path"
 }
 
-current_mouse=$(read_ui_bool mouse_capture true)
-current_borders=$(read_ui_bool pane_borders true)
-current_scrollbars=$(read_ui_bool pane_scrollbars true)
-
-toggle_ghostty_mouse_reporting() {
-  if [ "${HERDR_CLEAN_COPY_SKIP_GHOSTTY_MOUSE:-false}" = "true" ]; then
-    return 0
-  fi
-  if [ "$(uname -s)" != "Darwin" ] || ! command -v osascript >/dev/null 2>&1; then
-    return 0
-  fi
-  osascript <<'APPLESCRIPT' >/dev/null 2>&1
-tell application "Ghostty"
-  set targetTerminal to focused terminal of selected tab of front window
-  perform action "toggle_mouse_reporting" on targetTerminal
-end tell
-APPLESCRIPT
+read_ui_uint() {
+  awk -v key="$1" -v default_value="$2" '
+BEGIN { in_ui = 0; value = default_value }
+/^[[:space:]]*\[ui\][[:space:]]*(#.*)?$/ { in_ui = 1; next }
+/^[[:space:]]*\[/ { in_ui = 0 }
+in_ui && $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+  line = $0
+  sub(/^[^=]*=[[:space:]]*/, "", line)
+  sub(/[[:space:]]*(#.*)?$/, "", line)
+  if (line ~ /^[0-9]+$/) value = line
+}
+END { print value }
+' "$config_path"
 }
 
-if [ -f "$state_path" ]; then
-  mode=disabled
-  saved_pane=$(sed -n '1p' "$state_path")
-  saved_zoom=$(sed -n '2p' "$state_path")
-  target_mouse=$(sed -n '3p' "$state_path")
-  state_version=$(sed -n '4p' "$state_path")
-  target_borders=$(sed -n '5p' "$state_path")
-  target_scrollbars=$(sed -n '6p' "$state_path")
+read_current_ui() {
+  current_mouse=$(read_ui_bool mouse_capture true)
+  current_borders=$(read_ui_bool pane_borders true)
+  current_scrollbars=$(read_ui_bool pane_scrollbars true)
+  current_sidebar_width=$(read_ui_uint sidebar_width 26)
+  current_sidebar_min_width=$(read_ui_uint sidebar_min_width 18)
+  current_sidebar_max_width=$(read_ui_uint sidebar_max_width 36)
+}
 
-  # A config write after clean view was enabled means another control changed
-  # mouse behavior. Preserve that newer value instead of restoring stale state.
-  if { [ "$state_version" != "v2" ] &&
-       [ "$state_version" != "v3" ] &&
-       [ "$state_version" != "v4" ] &&
-       [ "$state_version" != "v5" ]; } ||
-     [ "$config_path" -nt "$state_path" ]; then
-    target_mouse=$current_mouse
-  fi
-
-  # v2 state predates border tracking; Herdr's default border setting was on.
-  if [ "$state_version" != "v3" ] &&
-     [ "$state_version" != "v4" ] &&
-     [ "$state_version" != "v5" ]; then
-    target_borders=true
-  fi
-  if [ "$state_version" != "v4" ] && [ "$state_version" != "v5" ]; then
-    target_scrollbars=true
-  fi
-
-  case "$target_mouse" in
-    true|false) ;;
-    *) target_mouse=$current_mouse ;;
+is_bool() {
+  case "$1" in
+    true|false) return 0 ;;
+    *) return 1 ;;
   esac
-  case "$target_borders" in
-    true|false) ;;
-    *) target_borders=true ;;
+}
+
+is_u16() {
+  case "$1" in
+    *[!0-9]*|'') return 1 ;;
   esac
-  case "$target_scrollbars" in
-    true|false) ;;
-    *) target_scrollbars=true ;;
-  esac
+  [ "$1" -le 65535 ]
+}
 
-  if [ "$saved_zoom" = "false" ] && [ -n "$saved_pane" ]; then
-    "$herdr_bin" pane zoom "$saved_pane" --off >/dev/null 2>&1 || true
+clamp_width() {
+  clamp_value=$1
+  clamp_min=$2
+  clamp_max=$3
+  if [ "$clamp_value" -lt "$clamp_min" ]; then
+    clamp_value=$clamp_min
+  elif [ "$clamp_value" -gt "$clamp_max" ]; then
+    clamp_value=$clamp_max
   fi
+  printf '%s\n' "$clamp_value"
+}
 
-  # v5 is the first state format that toggles Ghostty's application mouse
-  # reporting. Older state must not invert an unrelated host-terminal mode.
-  if [ "$state_version" = "v5" ]; then
-    toggle_ghostty_mouse_reporting || true
-  fi
-else
-  mode=enabled
-  target_mouse=false
-  target_borders=false
-  target_scrollbars=false
+write_ui_config() {
+  write_mouse=$1
+  write_borders=$2
+  write_scrollbars=$3
+  write_sidebar_width=$4
+  write_sidebar_min_width=$5
+  write_sidebar_max_width=$6
 
-  if [ -n "$pane_id" ]; then
-    layout=$("$herdr_bin" pane layout --pane "$pane_id")
-    saved_zoom=$(printf '%s\n' "$layout" | jq -r '.result.layout.zoomed // false')
-    printf '%s\n%s\n%s\nv5\n%s\n%s\n' \
-      "$pane_id" "$saved_zoom" "$current_mouse" "$current_borders" \
-      "$current_scrollbars" \
-      >"$state_path"
-    "$herdr_bin" pane zoom "$pane_id" --on >/dev/null
-  else
-    printf '\nfalse\n%s\nv5\n%s\n%s\n' \
-      "$current_mouse" "$current_borders" "$current_scrollbars" \
-      >"$state_path"
-    "$herdr_bin" pane zoom --current --on >/dev/null
-  fi
-  toggle_ghostty_mouse_reporting || true
-fi
-
-# Set clean-view UI values while preserving the rest of the user's TOML,
-# including comments and a symlinked config path.
-awk -v mouse="$target_mouse" -v borders="$target_borders" \
-    -v scrollbars="$target_scrollbars" '
+  # Preserve the rest of the TOML, its comments, and a symlinked config path.
+  awk -v mouse="$write_mouse" -v borders="$write_borders" \
+      -v scrollbars="$write_scrollbars" \
+      -v sidebar_width="$write_sidebar_width" \
+      -v sidebar_min_width="$write_sidebar_min_width" \
+      -v sidebar_max_width="$write_sidebar_max_width" '
 function add_keys() {
-  if (!mouse_found) {
-    print "mouse_capture = " mouse
-    mouse_found = 1
-  }
-  if (!borders_found) {
-    print "pane_borders = " borders
-    borders_found = 1
-  }
-  if (!scrollbars_found) {
-    print "pane_scrollbars = " scrollbars
-    scrollbars_found = 1
-  }
+  if (!mouse_found) print "mouse_capture = " mouse
+  if (!borders_found) print "pane_borders = " borders
+  if (!scrollbars_found) print "pane_scrollbars = " scrollbars
+  if (!sidebar_width_found) print "sidebar_width = " sidebar_width
+  if (!sidebar_min_width_found) print "sidebar_min_width = " sidebar_min_width
+  if (!sidebar_max_width_found) print "sidebar_max_width = " sidebar_max_width
+  mouse_found = borders_found = scrollbars_found = 1
+  sidebar_width_found = sidebar_min_width_found = sidebar_max_width_found = 1
 }
 
 BEGIN {
-  in_ui = 0
-  ui_seen = 0
-  mouse_found = 0
-  borders_found = 0
-  scrollbars_found = 0
+  in_ui = ui_seen = 0
+  mouse_found = borders_found = scrollbars_found = 0
+  sidebar_width_found = sidebar_min_width_found = sidebar_max_width_found = 0
 }
 
 /^[[:space:]]*\[ui\][[:space:]]*(#.*)?$/ {
-  in_ui = 1
-  ui_seen = 1
+  in_ui = ui_seen = 1
   print
   next
 }
@@ -171,21 +173,22 @@ BEGIN {
 {
   if (in_ui && $0 ~ /^[[:space:]]*mouse_capture[[:space:]]*=/) {
     sub(/=[[:space:]]*(true|false)/, "= " mouse)
-    print
     mouse_found = 1
-    next
-  }
-  if (in_ui && $0 ~ /^[[:space:]]*pane_borders[[:space:]]*=/) {
+  } else if (in_ui && $0 ~ /^[[:space:]]*pane_borders[[:space:]]*=/) {
     sub(/=[[:space:]]*(true|false)/, "= " borders)
-    print
     borders_found = 1
-    next
-  }
-  if (in_ui && $0 ~ /^[[:space:]]*pane_scrollbars[[:space:]]*=/) {
+  } else if (in_ui && $0 ~ /^[[:space:]]*pane_scrollbars[[:space:]]*=/) {
     sub(/=[[:space:]]*(true|false)/, "= " scrollbars)
-    print
     scrollbars_found = 1
-    next
+  } else if (in_ui && $0 ~ /^[[:space:]]*sidebar_width[[:space:]]*=/) {
+    sub(/=[[:space:]]*[0-9]+/, "= " sidebar_width)
+    sidebar_width_found = 1
+  } else if (in_ui && $0 ~ /^[[:space:]]*sidebar_min_width[[:space:]]*=/) {
+    sub(/=[[:space:]]*[0-9]+/, "= " sidebar_min_width)
+    sidebar_min_width_found = 1
+  } else if (in_ui && $0 ~ /^[[:space:]]*sidebar_max_width[[:space:]]*=/) {
+    sub(/=[[:space:]]*[0-9]+/, "= " sidebar_max_width)
+    sidebar_max_width_found = 1
   }
   print
 }
@@ -195,27 +198,257 @@ END {
   if (!ui_seen) {
     print ""
     print "[ui]"
-    print "mouse_capture = " mouse
-    print "pane_borders = " borders
-    print "pane_scrollbars = " scrollbars
+    add_keys()
   }
 }
 ' "$config_path" >"$temp_path"
 
-cat "$temp_path" >"$config_path"
+  cat "$temp_path" >"$config_path"
+}
 
-if "$herdr_bin" server reload-config >/dev/null 2>&1; then
-  if [ "$mode" = "disabled" ]; then
-    rm -f "$state_path"
-  else
-    # The marker must be newer than our own config write. A later config edit
-    # can then be recognized as an external mouse-mode change on exit.
-    touch "$state_path"
+read_persisted_sidebar_width() {
+  herdr_config_home=${XDG_CONFIG_HOME:-${HOME}/.config}/herdr
+  case "${HERDR_SESSION:-default}" in
+    ''|default) session_path=$herdr_config_home/session.json ;;
+    *) session_path=$herdr_config_home/sessions/$HERDR_SESSION/session.json ;;
+  esac
+  if [ -f "$session_path" ]; then
+    jq -r '.sidebar_width // empty' "$session_path" 2>/dev/null || true
   fi
-  "$herdr_bin" notification show "Clean pane copy view $mode" \
+}
+
+get_layout() {
+  if [ -n "$pane_id" ]; then
+    "$herdr_bin" pane layout --pane "$pane_id" 2>/dev/null || true
+  else
+    "$herdr_bin" pane layout --current 2>/dev/null || true
+  fi
+}
+
+runtime_sidebar_width() {
+  runtime_layout=$1
+  runtime_fallback=$2
+  runtime_min=$3
+  runtime_max=$4
+  runtime_x=$(printf '%s\n' "$runtime_layout" | \
+    jq -r '.result.layout.area.x // empty' 2>/dev/null || true)
+  persisted_width=$(read_persisted_sidebar_width)
+
+  if is_u16 "$runtime_x" &&
+     [ "$runtime_x" -ge "$runtime_min" ] &&
+     [ "$runtime_x" -le "$runtime_max" ]; then
+    printf '%s\n' "$runtime_x"
+  elif is_u16 "$persisted_width" &&
+       [ "$persisted_width" -ge "$runtime_min" ] &&
+       [ "$persisted_width" -le "$runtime_max" ]; then
+    printf '%s\n' "$persisted_width"
+  else
+    clamp_width "$runtime_fallback" "$runtime_min" "$runtime_max"
+  fi
+}
+
+notify_mode() {
+  "$herdr_bin" notification show "Clean pane copy view $1" \
     --body "Use Ctrl-a m to toggle the view." \
     --sound none >/dev/null 2>&1 || true
-else
-  printf 'Updated %s, but Herdr server reload failed.\n' "$config_path" >&2
+}
+
+# v5 and earlier used one global marker and toggled Ghostty outside Herdr. Move
+# a matching active marker into this instance's namespace so one final toggle
+# can restore that legacy terminal override.
+read_current_ui
+if [ ! -f "$state_path" ] && [ -f "$legacy_state_path" ]; then
+  legacy_version=$(sed -n '4p' "$legacy_state_path")
+  legacy_pane=$(sed -n '1p' "$legacy_state_path")
+  case "$legacy_version" in
+    v2|v3|v4|v5)
+      if [ "$current_mouse" = false ] &&
+         { [ -z "$legacy_pane" ] ||
+           "$herdr_bin" pane get "$legacy_pane" >/dev/null 2>&1; }; then
+        mv "$legacy_state_path" "$state_path"
+      fi
+      ;;
+  esac
+fi
+
+restore_legacy_ghostty_mouse() {
+  [ "${HERDR_CLEAN_COPY_SKIP_GHOSTTY_MOUSE:-false}" != true ] || return 0
+  [ "$(uname -s)" = Darwin ] || return 0
+  command -v osascript >/dev/null 2>&1 || return 0
+  osascript <<'APPLESCRIPT' >/dev/null 2>&1
+tell application "Ghostty"
+  set targetTerminal to focused terminal of selected tab of front window
+  perform action "toggle_mouse_reporting" on targetTerminal
+end tell
+APPLESCRIPT
+}
+
+if [ ! -f "$state_path" ]; then
+  if [ -z "$pane_id" ]; then
+    pane_id=$("$herdr_bin" api snapshot 2>/dev/null | \
+      jq -r '.result.snapshot.focused_pane_id // empty' 2>/dev/null || true)
+  fi
+
+  layout=$(get_layout)
+  saved_zoom=$(printf '%s\n' "$layout" | \
+    jq -r '.result.layout.zoomed // false' 2>/dev/null || printf 'false\n')
+  is_bool "$saved_zoom" || saved_zoom=false
+  saved_runtime_sidebar_width=$(runtime_sidebar_width "$layout" \
+    "$current_sidebar_width" "$current_sidebar_min_width" \
+    "$current_sidebar_max_width")
+
+  state_temp_path=$(mktemp "$state_dir/.clean-copy-view-state.XXXXXX")
+  printf '%s\n%s\n%s\nv6\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+    "$pane_id" "$saved_zoom" "$current_mouse" "$current_borders" \
+    "$current_scrollbars" "$current_sidebar_width" \
+    "$current_sidebar_min_width" "$current_sidebar_max_width" \
+    "$saved_runtime_sidebar_width" >"$state_temp_path"
+  mv "$state_temp_path" "$state_path"
+  state_temp_path=
+
+  backup_path=$(mktemp "${TMPDIR:-/tmp}/herdr-config-backup.XXXXXX")
+  cp "$config_path" "$backup_path"
+
+  if [ -n "$pane_id" ]; then
+    "$herdr_bin" pane zoom "$pane_id" --on >/dev/null 2>&1 || true
+  else
+    "$herdr_bin" pane zoom --current --on >/dev/null 2>&1 || true
+  fi
+
+  write_ui_config false false false 0 0 0
+  if ! "$herdr_bin" server reload-config >/dev/null 2>&1; then
+    cat "$backup_path" >"$config_path"
+    "$herdr_bin" server reload-config >/dev/null 2>&1 || true
+    if [ "$saved_zoom" = false ] && [ -n "$pane_id" ]; then
+      "$herdr_bin" pane zoom "$pane_id" --off >/dev/null 2>&1 || true
+    fi
+    rm -f "$state_path"
+    printf 'Could not enable clean copy view; restored %s.\n' "$config_path" >&2
+    exit 1
+  fi
+
+  # Later config writes can now be distinguished from this script's write.
+  touch "$state_path"
+  notify_mode enabled
+  exit 0
+fi
+
+saved_pane=$(sed -n '1p' "$state_path")
+saved_zoom=$(sed -n '2p' "$state_path")
+saved_mouse=$(sed -n '3p' "$state_path")
+state_version=$(sed -n '4p' "$state_path")
+
+case "$state_version" in
+  v6)
+    saved_borders=$(sed -n '5p' "$state_path")
+    saved_scrollbars=$(sed -n '6p' "$state_path")
+    saved_sidebar_width=$(sed -n '7p' "$state_path")
+    saved_sidebar_min_width=$(sed -n '8p' "$state_path")
+    saved_sidebar_max_width=$(sed -n '9p' "$state_path")
+    saved_runtime_sidebar_width=$(sed -n '10p' "$state_path")
+    legacy_ghostty=false
+    ;;
+  v2|v3|v4|v5)
+    saved_borders=true
+    saved_scrollbars=true
+    [ "$state_version" = v2 ] || saved_borders=$(sed -n '5p' "$state_path")
+    case "$state_version" in
+      v4|v5) saved_scrollbars=$(sed -n '6p' "$state_path") ;;
+    esac
+    saved_sidebar_width=$current_sidebar_width
+    saved_sidebar_min_width=$current_sidebar_min_width
+    saved_sidebar_max_width=$current_sidebar_max_width
+    legacy_layout=$(get_layout)
+    saved_runtime_sidebar_width=$(runtime_sidebar_width "$legacy_layout" \
+      "$saved_sidebar_width" "$saved_sidebar_min_width" \
+      "$saved_sidebar_max_width")
+    [ "$state_version" = v5 ] && legacy_ghostty=true || legacy_ghostty=false
+    ;;
+  *)
+    printf 'Unsupported clean copy state in %s; remove it manually after inspection.\n' \
+      "$state_path" >&2
+    exit 1
+    ;;
+esac
+
+is_bool "$saved_zoom" || saved_zoom=false
+is_bool "$saved_mouse" || saved_mouse=$current_mouse
+is_bool "$saved_borders" || saved_borders=true
+is_bool "$saved_scrollbars" || saved_scrollbars=true
+
+if ! is_u16 "$saved_sidebar_width" ||
+   ! is_u16 "$saved_sidebar_min_width" ||
+   ! is_u16 "$saved_sidebar_max_width" ||
+   [ "$saved_sidebar_min_width" -gt "$saved_sidebar_max_width" ]; then
+  saved_sidebar_width=$current_sidebar_width
+  saved_sidebar_min_width=$current_sidebar_min_width
+  saved_sidebar_max_width=$current_sidebar_max_width
+fi
+if ! is_u16 "$saved_runtime_sidebar_width"; then
+  saved_runtime_sidebar_width=$(clamp_width "$saved_sidebar_width" \
+    "$saved_sidebar_min_width" "$saved_sidebar_max_width")
+fi
+saved_runtime_sidebar_width=$(clamp_width "$saved_runtime_sidebar_width" \
+  "$saved_sidebar_min_width" "$saved_sidebar_max_width")
+
+target_mouse=$saved_mouse
+target_borders=$saved_borders
+target_scrollbars=$saved_scrollbars
+target_sidebar_width=$saved_sidebar_width
+target_sidebar_min_width=$saved_sidebar_min_width
+target_sidebar_max_width=$saved_sidebar_max_width
+
+# Preserve explicit changes to managed settings made while clean view was on.
+# Mouse mode keeps the established mtime behavior because another controller
+# may write the same `false` value that clean view already uses.
+if [ "$config_path" -nt "$state_path" ]; then
+  target_mouse=$current_mouse
+  [ "$current_borders" = false ] || target_borders=$current_borders
+  [ "$current_scrollbars" = false ] || target_scrollbars=$current_scrollbars
+  if { [ "$current_sidebar_width" != 0 ] ||
+       [ "$current_sidebar_min_width" != 0 ] ||
+       [ "$current_sidebar_max_width" != 0 ]; } &&
+     { [ "$current_sidebar_width" != "$saved_runtime_sidebar_width" ] ||
+       [ "$current_sidebar_min_width" != "$saved_runtime_sidebar_width" ] ||
+       [ "$current_sidebar_max_width" != "$saved_runtime_sidebar_width" ]; }; then
+    if [ "$current_sidebar_min_width" -le "$current_sidebar_max_width" ]; then
+      target_sidebar_width=$current_sidebar_width
+      target_sidebar_min_width=$current_sidebar_min_width
+      target_sidebar_max_width=$current_sidebar_max_width
+      changed_layout=$(get_layout)
+      saved_runtime_sidebar_width=$(runtime_sidebar_width "$changed_layout" \
+        "$target_sidebar_width" "$target_sidebar_min_width" \
+        "$target_sidebar_max_width")
+    fi
+  fi
+fi
+
+# First force Herdr's runtime-owned width back to its exact prior value. Then
+# restore the user's configured default and bounds without losing that width.
+write_ui_config "$target_mouse" "$target_borders" "$target_scrollbars" \
+  "$saved_runtime_sidebar_width" "$saved_runtime_sidebar_width" \
+  "$saved_runtime_sidebar_width"
+if ! "$herdr_bin" server reload-config >/dev/null 2>&1; then
+  printf 'Updated %s, but the first Herdr restore reload failed.\n' \
+    "$config_path" >&2
   exit 1
 fi
+
+write_ui_config "$target_mouse" "$target_borders" "$target_scrollbars" \
+  "$target_sidebar_width" "$target_sidebar_min_width" \
+  "$target_sidebar_max_width"
+if ! "$herdr_bin" server reload-config >/dev/null 2>&1; then
+  printf 'Restored %s, but the final Herdr reload failed; Ctrl-a m will retry.\n' \
+    "$config_path" >&2
+  exit 1
+fi
+
+if [ "$saved_zoom" = false ] && [ -n "$saved_pane" ]; then
+  "$herdr_bin" pane zoom "$saved_pane" --off >/dev/null 2>&1 || true
+fi
+if [ "$legacy_ghostty" = true ]; then
+  restore_legacy_ghostty_mouse || true
+fi
+
+rm -f "$state_path"
+notify_mode disabled
